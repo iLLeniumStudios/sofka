@@ -93,6 +93,9 @@ pub struct Config {
     pub logs: LogsConfig,
     /// Cross-context fleet dashboard (`:fleet`) — see [`FleetConfig`].
     pub fleet: FleetConfig,
+    /// Extra kubeconfig files to read contexts from, alongside the one
+    /// `kubectl` itself would use — see [`KubeconfigsConfig`].
+    pub kubeconfigs: KubeconfigsConfig,
     /// Saved port-forwards — see [`Forward`]. Validated by
     /// [`forward_warnings`].
     pub forwards: Vec<Forward>,
@@ -276,6 +279,30 @@ pub fn forward_warnings(forwards: &[Forward]) -> Vec<String> {
 pub struct FleetConfig {
     /// Kubeconfig context names to summarize. Empty = the dashboard is off.
     pub contexts: Vec<String>,
+}
+
+/// Extra kubeconfigs to read contexts from. The one `kubectl` itself would
+/// use (`$KUBECONFIG`, else `~/.kube/config`) is always read; these are read
+/// on their own, so a context here is never shadowed by a same-named one in
+/// the default kubeconfig.
+///
+/// A path may be a kubeconfig file or a directory of them — a directory
+/// contributes every kubeconfig found under it, which is how collections
+/// managed by tools like kubeswitch are laid out.
+///
+/// ```toml
+/// [kubeconfigs]
+/// paths = ["~/.kube/work.yaml", "~/.kube/configs"]
+/// ```
+///
+/// `:kubeconfig` adds and removes paths at runtime; those edits persist to
+/// `<state-dir>/kubeconfigs.toml` and overlay this list rather than
+/// rewriting it.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct KubeconfigsConfig {
+    /// Kubeconfig files or directories. A leading `~/` is expanded.
+    pub paths: Vec<String>,
 }
 
 /// Log-view controls (kubelet streams).

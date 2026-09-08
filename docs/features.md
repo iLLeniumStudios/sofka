@@ -209,11 +209,15 @@ The full list. For how sofka compares to k9s, see [vs k9s](vs-k9s.md).
   apply to the first successful selection only. These commands require
   interactive mode.
 - **Namespace switcher** (`n`) with pinned favourites (★) and per-context
-  session recents (·) above the rest, plus a context switcher (`:ctx`). In the
-  resource table, `1` to `9` select the first nine configured favourites in fixed
-  configuration order. The picker shows these shortcuts beside favourites.
-  Unconfigured slots do nothing. `0` selects all namespaces. The
-  last namespace picked in each context is remembered across restarts
+  session recents (·) above the rest, plus a context switcher (`:ctx`) that
+  lists contexts from the default kubeconfig and from any extra file or
+  directory of kubeconfigs added with `:kubeconfig`, showing each context's
+  cluster, server, namespace, and source file. Same-named contexts in
+  different kubeconfigs stay distinct (`prod@work`), down to their remembered
+  namespace. In the resource table, `1` to `9` select the first nine configured
+  favourites in fixed configuration order. The picker shows these shortcuts
+  beside favourites. Unconfigured slots do nothing. `0` selects all namespaces.
+  The last namespace picked in each cluster is remembered across restarts
   (`<state-dir>/namespaces.toml`); `-n`/`-A` override it for a session.
 - **Selected namespace** (`W`) switches to the cursor row's namespace and
   keeps the resource kind. It uses normal namespace history and watch behavior.

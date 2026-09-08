@@ -222,6 +222,9 @@ pub enum Mode {
     /// declared ports for single-select, plus a "Custom…" entry that falls
     /// through to the typed prompt.
     PortForwardPicker,
+    /// Kubeconfig file manager (`:kubeconfig`): which files the context
+    /// switcher reads from.
+    Kubeconfigs,
 }
 
 /// A request for the run loop to suspend the TUI and run an interactive
@@ -495,6 +498,9 @@ enum PromptKind {
     RenameContext {
         old: String,
     },
+    /// Path of a kubeconfig file to add (`a` in `:kubeconfig`) — opened from
+    /// (and returning to) [`Mode::Kubeconfigs`].
+    AddKubeconfig,
 }
 
 #[derive(Default)]
@@ -636,12 +642,17 @@ enum PaletteAction {
     Notify,
     Reload,
     ConfigInfo,
+    Kubeconfigs,
 }
 
 const PALETTE_COMMANDS: &[PaletteCommand] = &[
     PaletteCommand {
         action: PaletteAction::Ctx,
         names: &["ctx", "context", "contexts"],
+    },
+    PaletteCommand {
+        action: PaletteAction::Kubeconfigs,
+        names: &["kubeconfig", "kubeconfigs", "kc"],
     },
     PaletteCommand {
         action: PaletteAction::Helm,
@@ -1552,8 +1563,20 @@ struct NamespaceMemo {
 
 struct ContextMemo {
     filter: String,
-    ctx_list: Vec<String>,
-    value: Rc<Vec<String>>,
+    ctx_list: Vec<crate::kubeconfigs::Entry>,
+    value: Rc<Vec<crate::kubeconfigs::Entry>>,
+}
+
+/// One row of the `:kubeconfig` list: an extra source and what it provides.
+/// The default kubeconfig is rendered separately and is never in this list.
+pub struct KubeconfigRow {
+    pub path: std::path::PathBuf,
+    /// A directory of kubeconfigs rather than a single file.
+    pub directory: bool,
+    /// Kubeconfig files found (1 for a file source, 0 when the path is gone).
+    pub files: usize,
+    /// Contexts those files provide.
+    pub contexts: usize,
 }
 
 struct SortEntryMemo {
@@ -1762,7 +1785,7 @@ pub struct App {
     gen_flag: Arc<AtomicU64>,
     /// Context currently being connected to, paired with the generation that
     /// owns its eventual result.
-    context_switch_target: Option<(u64, String)>,
+    context_switch_target: Option<(u64, crate::kubeconfigs::ClusterId)>,
     /// Explicit launch scope, consumed by the first successful picker connection.
     launch_namespace: Option<String>,
     pub tasks: Vec<JoinHandle<()>>,
@@ -1894,7 +1917,7 @@ pub struct App {
     /// cluster-wide namespace listing is restricted).
     pub ns_filter: String,
 
-    pub ctx_list: Vec<String>,
+    pub ctx_list: Vec<crate::kubeconfigs::Entry>,
     pub ctx_state: ListState,
     /// Type-to-filter buffer for the context switcher. Plain action keys remain
     /// available until filtering starts.
@@ -1911,9 +1934,27 @@ pub struct App {
     /// The selected row's `(header, value)` pairs, captured when the copy
     /// picker opens so a watch update can't shift entries mid-pick.
     pub copy_picker_fields: Vec<(String, String)>,
-    /// All kubeconfig context names, cached once at startup for `:ctx <name>`
-    /// palette completion (the switcher popup uses `ctx_list`).
-    pub all_contexts: Vec<String>,
+    /// Every selectable context, cached at startup and on `:reload` for
+    /// `:ctx <name>` palette completion (the switcher popup uses `ctx_list`).
+    pub all_contexts: Vec<crate::kubeconfigs::Entry>,
+    /// Extra kubeconfig paths from config (`[kubeconfigs] paths`), re-resolved
+    /// on context switch and `:reload`.
+    pub kubeconfigs_cfg: crate::config::KubeconfigsConfig,
+    /// Directories passed to `--kubeconfig`: active for this session only,
+    /// never written to the mark file.
+    pub session_kubeconfig_paths: Vec<std::path::PathBuf>,
+    /// Runtime kubeconfig edits (`a`/`d` in `:kubeconfig`), overlaying
+    /// `[kubeconfigs] paths`. Persisted to `kubeconfig_marks_path`.
+    pub kubeconfig_marks: crate::kubeconfigs::SourceMarks,
+    /// Where kubeconfig marks persist (`<state-dir>/kubeconfigs.toml`, set at
+    /// startup); `None` (tests) keeps them in memory only.
+    pub kubeconfig_marks_path: Option<std::path::PathBuf>,
+    /// Cursor in the `:kubeconfig` file list.
+    pub kubeconfig_state: ListState,
+    /// What `:kubeconfig` shows, rebuilt whenever the source set changes.
+    /// Cached because counting a directory's kubeconfigs means reading them,
+    /// which must never happen on the render path.
+    pub kubeconfig_rows: Vec<KubeconfigRow>,
     /// User aliases from config, re-applied when switching context.
     pub user_aliases: HashMap<String, String>,
     /// User-defined shell-out plugins.
@@ -2315,6 +2356,8 @@ impl App {
             ns_filter: String::new(),
             ctx_list: Vec::new(),
             ctx_state: ListState::default(),
+            kubeconfig_rows: Vec::new(),
+            session_kubeconfig_paths: Vec::new(),
             ctx_filter: String::new(),
             ctx_filtering: false,
             sort_picker_state: ListState::default(),
@@ -2323,6 +2366,10 @@ impl App {
             copy_picker_filter: String::new(),
             copy_picker_fields: Vec::new(),
             all_contexts: Vec::new(),
+            kubeconfigs_cfg: crate::config::KubeconfigsConfig::default(),
+            kubeconfig_marks: crate::kubeconfigs::SourceMarks::default(),
+            kubeconfig_marks_path: None,
+            kubeconfig_state: ListState::default(),
             user_aliases: HashMap::new(),
             plugins: Vec::new(),
             plugin_task: None,
@@ -2495,6 +2542,11 @@ impl App {
     /// renderer keeps the picker underneath it and esc/enter return there.
     pub fn prompt_over_contexts(&self) -> bool {
         matches!(self.prompt_kind, Some(PromptKind::RenameContext { .. }))
+    }
+
+    /// Same, for the kubeconfig list: `a`'s path prompt returns there.
+    pub fn prompt_over_kubeconfigs(&self) -> bool {
+        matches!(self.prompt_kind, Some(PromptKind::AddKubeconfig))
     }
 
     /// Where a confirm dialog returns to. Not every `Mode::Confirm` goes

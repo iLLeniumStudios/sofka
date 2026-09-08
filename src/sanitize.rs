@@ -122,6 +122,7 @@ pub async fn run(allow_v1_client_cert: bool, no_tls_resumption: bool) -> Result<
     }
     let client = client_for(
         request.get("context").and_then(Value::as_str),
+        request.get("kubeconfig").and_then(Value::as_str),
         allow_v1_client_cert,
         no_tls_resumption,
     )
@@ -397,8 +398,11 @@ fn selectors(filter: Option<&str>) -> Result<(Option<String>, Option<String>)> {
 
 /// Build a client for the request's context. A null context means sofka had no
 /// explicit kubeconfig context name, so let the usual inference apply.
+/// `kubeconfig` is the file that context lives in when it is not the one
+/// kubectl resolves on its own — without it the context would not be found.
 async fn client_for(
     context: Option<&str>,
+    kubeconfig: Option<&str>,
     allow_v1_client_cert: bool,
     no_tls_resumption: bool,
 ) -> Result<Client> {
@@ -409,7 +413,11 @@ async fn client_for(
                 cluster: None,
                 user: None,
             };
-            let kubeconfig = kube::config::Kubeconfig::read().context("reading kubeconfig")?;
+            let kubeconfig = match kubeconfig {
+                Some(path) => kube::config::Kubeconfig::read_from(path)
+                    .with_context(|| format!("reading {path}"))?,
+                None => kube::config::Kubeconfig::read().context("reading kubeconfig")?,
+            };
             Config::from_custom_kubeconfig(kubeconfig, &options)
                 .await
                 .with_context(|| format!("building config for context '{name}'"))?

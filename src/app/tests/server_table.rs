@@ -334,7 +334,7 @@ async fn context_changes_stop_the_old_feed_and_discard_its_cells() {
     cluster.register_kind("example.com", "Widget", "widgets", true);
     app.handle_msg(Msg::ContextSwitched {
         generation: app.generation,
-        name: "west".into(),
+        id: crate::kubeconfigs::ClusterId::new("west"),
         result: Ok(Box::new(cluster)),
     });
     tokio::task::yield_now().await;
