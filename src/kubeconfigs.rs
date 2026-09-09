@@ -83,10 +83,14 @@ impl ClusterId {
 
     /// Key for persisted per-cluster state (remembered namespaces, fleet
     /// membership). A default-source context keys on its bare name, so state
-    /// written before kubeconfig sources existed still resolves; anything else
-    /// is qualified by absolute path, which no context name can collide with
-    /// (`@` is legal in neither a kubeconfig context name nor a DNS label, and
-    /// even an EKS ARN — full of `:` and `/` — has none).
+    /// written before kubeconfig sources existed still resolves; a context
+    /// from an added file is suffixed with that file's absolute path.
+    ///
+    /// The suffix is told apart from a context name that merely contains `@`
+    /// — `kubernetes-admin@kubernetes` is what kubeadm writes — by requiring
+    /// it to be absolute. [`expand`] absolutizes every source path, so a
+    /// file-backed key always has a leading `/` after the last `@` and a bare
+    /// context name never does.
     pub fn state_key(&self) -> String {
         match &self.source {
             Source::Default => self.context.clone(),
@@ -97,7 +101,7 @@ impl ClusterId {
     /// Inverse of [`Self::state_key`], for reading persisted state back.
     pub fn from_state_key(key: &str) -> Self {
         match key.rsplit_once('@') {
-            Some((context, path)) if !path.is_empty() => Self::in_file(path, context),
+            Some((context, path)) if Path::new(path).is_absolute() => Self::in_file(path, context),
             _ => Self::new(key),
         }
     }
@@ -282,15 +286,23 @@ fn is_noise(name: &str) -> bool {
         || BACKUP_MARKERS.iter().any(|marker| name.contains(marker))
 }
 
-/// Expand a leading `~` so config and typed paths behave like the shell.
+/// Expand a leading `~` so config and typed paths behave like the shell, then
+/// absolutize. Absolute is not cosmetic: [`ClusterId::state_key`] tells a
+/// file suffix apart from a context name containing `@` by the leading `/`,
+/// and a relative path would also mean different clusters from different
+/// working directories.
 fn expand(path: &str) -> PathBuf {
     let trimmed = path.trim();
-    if let Some(rest) = trimmed.strip_prefix("~/")
-        && let Some(home) = std::env::var_os("HOME")
-    {
-        return PathBuf::from(home).join(rest);
-    }
-    PathBuf::from(trimmed)
+    let expanded = match trimmed.strip_prefix("~/") {
+        Some(rest) => match std::env::var_os("HOME") {
+            Some(home) => PathBuf::from(home).join(rest),
+            None => PathBuf::from(trimmed),
+        },
+        None => PathBuf::from(trimmed),
+    };
+    // Purely lexical, unlike `canonicalize`: a source that does not exist yet
+    // still has to resolve to a stable key rather than an error.
+    std::path::absolute(&expanded).unwrap_or(expanded)
 }
 
 /// One selectable context, with the metadata the switcher shows so you can
@@ -542,13 +554,32 @@ mod tests {
     }
 
     #[test]
-    fn context_names_containing_at_round_trip() {
-        // Splitting on the last `@` keeps a context name that contains one.
-        let id = ClusterId::in_file("/tmp/k.yaml", "user@cluster");
+    fn a_context_name_containing_at_stays_in_the_default_kubeconfig() {
+        // `kubernetes-admin@kubernetes` is what kubeadm writes, and `@` is
+        // legal in a context name generally. Reading such a key back as a
+        // file-backed cluster would point every kubectl shell-out at a
+        // kubeconfig called `kubernetes` that does not exist.
+        let id = ClusterId::new("kubernetes-admin@kubernetes");
+        assert_eq!(id.state_key(), "kubernetes-admin@kubernetes");
         assert_eq!(ClusterId::from_state_key(&id.state_key()), id);
-        assert_eq!(
-            ClusterId::from_state_key("user@cluster"),
-            ClusterId::in_file("cluster", "user"),
+        assert!(ClusterId::from_state_key("user@cluster").path().is_none());
+
+        // A real file suffix is absolute, which is what tells the two apart —
+        // including for a context name that itself contains `@`.
+        let sourced = ClusterId::in_file("/tmp/k.yaml", "user@cluster");
+        assert_eq!(ClusterId::from_state_key(&sourced.state_key()), sourced);
+    }
+
+    #[test]
+    fn source_paths_are_absolute_so_their_keys_are_stable() {
+        let marks = SourceMarks {
+            added: vec!["relative/kube.yaml".into()],
+            removed: Vec::new(),
+        };
+        let files = active_paths(&[], &marks);
+        assert!(
+            files[0].is_absolute(),
+            "a relative source would key differently per working directory: {files:?}"
         );
     }
 

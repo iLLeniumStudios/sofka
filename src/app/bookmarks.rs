@@ -34,10 +34,14 @@ impl App {
     /// bookmark is stashed and applied once the switch lands
     /// ([`Self::apply_pending_bookmark`]).
     pub(super) fn apply_bookmark(&mut self, bm: crate::config::Bookmark) {
+        // By identity, not by name: a bookmark naming an added kubeconfig's
+        // `prod` must still switch when the default kubeconfig's `prod` is
+        // what happens to be live.
         if let Some(ctx) = bm.context.clone()
-            && ctx != self.cluster.context
+            && let target = self.resolve_cluster_label(&ctx)
+            && target != self.cluster.id()
         {
-            self.switch_context_labeled(&ctx);
+            self.switch_context(target);
             self.pending_resource_query = None;
             self.pending_workspace = None;
             self.pending_bookmark = Some(bm);

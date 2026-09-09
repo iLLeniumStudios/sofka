@@ -1499,6 +1499,9 @@ impl App {
         self.pvc_cfg = resolved.config.pvc_explore;
         self.logs_cfg = resolved.config.logs;
         self.fleet_cfg = resolved.config.fleet;
+        // Where clusters are found comes from the base config only, so that a
+        // per-context override cannot shrink the list you switch through.
+        self.kubeconfigs_cfg = self.config.resolve("", "").config.kubeconfigs;
         // Running forwards keep running; :reload only refreshes what's saved.
         self.forwards_cfg = resolved.config.forwards;
         self.notify_cfg = resolved.config.notify;

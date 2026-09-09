@@ -48,10 +48,12 @@ impl App {
             self.flash_warn(&format!("workspace '{}' has no views", ws.name));
             return;
         }
+        // By identity, not by name — see `apply_bookmark`.
         if let Some(ctx) = ws.context.clone()
-            && ctx != self.cluster.context
+            && let target = self.resolve_cluster_label(&ctx)
+            && target != self.cluster.id()
         {
-            self.switch_context_labeled(&ctx);
+            self.switch_context(target);
             self.pending_resource_query = None;
             self.pending_bookmark = None;
             self.pending_workspace = Some(ws);

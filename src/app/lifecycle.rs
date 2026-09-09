@@ -18,11 +18,15 @@ impl App {
     // ----- navigation ----------------------------------------------------
 
     pub(super) fn apply_resource_query(&mut self, query: crate::filter::ResourceQuery) {
+        // Compare the cluster the label resolves to, not the bare name: an
+        // added kubeconfig's `prod` and the default kubeconfig's `prod` are
+        // different clusters, and a name-only match would open the query
+        // against whichever one happens to be live.
         if let Some(context) = &query.context
-            && (context != &self.cluster.context || !self.cluster.connected)
+            && let target = self.resolve_cluster_label(context)
+            && (target != self.cluster.id() || !self.cluster.connected)
         {
-            let context = context.clone();
-            self.switch_context_labeled(&context);
+            self.switch_context(target);
             self.pending_bookmark = None;
             self.pending_workspace = None;
             self.pending_resource_query = Some(query);

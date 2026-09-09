@@ -878,7 +878,10 @@ impl App {
         self.pvc_cfg = resolved.config.pvc_explore;
         self.logs_cfg = resolved.config.logs;
         self.fleet_cfg = resolved.config.fleet;
-        self.kubeconfigs_cfg = resolved.config.kubeconfigs;
+        // `[kubeconfigs]` is deliberately not re-resolved here. It says where
+        // clusters are found, so it has to hold for every cluster: taking it
+        // from the context you just switched into would let that context's
+        // override drop the sources you would switch back through.
         // Tracked debuggers belong to the previous cluster/context.
         self.launched_node_debuggers.clear();
         let mut plugin_warnings = crate::config::plugin_warnings(&self.plugins);

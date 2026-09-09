@@ -14430,6 +14430,78 @@ async fn a_name_two_kubeconfigs_share_is_qualified_and_stays_selectable() {
 }
 
 #[tokio::test]
+async fn navigation_to_a_same_named_context_switches_by_kubeconfig() {
+    let (mut app, _rx) = test_app();
+    let file = write_kubeconfig(&scratch("kc-nav"), "work.yaml", "prod");
+    // Live on the added file's `prod`…
+    let mut cluster = Cluster::fake();
+    cluster.context = "prod".into();
+    cluster.source = crate::kubeconfigs::Source::File(file.clone());
+    app.apply_context_switch(
+        crate::kubeconfigs::ClusterId::in_file(&file, "prod"),
+        Box::new(cluster),
+    );
+    app.all_contexts = vec![
+        crate::kubeconfigs::Entry::named("prod"),
+        crate::kubeconfigs::Entry {
+            id: crate::kubeconfigs::ClusterId::in_file(&file, "prod"),
+            cluster: "c".into(),
+            server: String::new(),
+            namespace: None,
+            source_label: "work".into(),
+            label: "prod@work".into(),
+            current: false,
+        },
+    ];
+
+    // …and a bookmark naming the default kubeconfig's `prod` must switch,
+    // not silently open against the cluster that happens to be live.
+    app.apply_bookmark(crate::config::Bookmark {
+        key: None,
+        name: "bm".into(),
+        resource: "pods".into(),
+        namespace: None,
+        context: Some("prod".into()),
+        filter: None,
+        sort: None,
+        view: None,
+    });
+    assert!(
+        app.pending_bookmark.is_some(),
+        "the bookmark waits for a switch"
+    );
+    assert!(app.flash.contains("switching to"), "{}", app.flash);
+}
+
+#[tokio::test]
+async fn a_context_override_cannot_drop_kubeconfig_sources() {
+    let dir = scratch("kc-override");
+    let file = write_kubeconfig(&dir, "work.yaml", "work-prod");
+    // A per-cluster override file that declares no sources of its own.
+    let cluster_dir = dir.join("clusters").join("test-cluster");
+    std::fs::create_dir_all(&cluster_dir).unwrap();
+    std::fs::write(cluster_dir.join("config.toml"), "readonly = true\n").unwrap();
+
+    let (mut app, _rx) = test_app();
+    app.config = crate::config::ConfigLoader::from_dir(Some(dir.clone()));
+    app.kubeconfigs_cfg = crate::config::KubeconfigsConfig {
+        paths: vec![file.to_string_lossy().to_string()],
+    };
+
+    app.apply_context_switch(
+        crate::kubeconfigs::ClusterId::new("test"),
+        Box::new(Cluster::fake()),
+    );
+    assert!(app.readonly, "the override still applies");
+    assert_eq!(
+        app.kubeconfig_sources(),
+        vec![file],
+        "switching must not drop the sources you would switch back through"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
 async fn renaming_is_refused_for_a_context_from_an_added_kubeconfig() {
     let (mut app, _rx) = test_app();
     app.mode = Mode::Contexts;

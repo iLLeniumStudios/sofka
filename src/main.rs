@@ -417,7 +417,9 @@ async fn run_main(args: Args) -> Result<()> {
     // keystroke. `:kubeconfig` refreshes it when the file set changes.
     app.all_contexts = contexts;
     app.session_kubeconfig_paths = split_kubeconfig_args(&args.kubeconfig).1;
-    app.kubeconfigs_cfg = cfg.kubeconfigs.clone();
+    // From the base config, never the per-context layer: where clusters are
+    // found has to hold for every cluster (see `apply_context_switch`).
+    app.kubeconfigs_cfg = base.config.kubeconfigs.clone();
     app.kubeconfig_marks = kubeconfig_marks;
     app.kubeconfig_marks_path = Some(kubeconfig_marks_path);
     app.user_aliases = cfg.aliases.clone();

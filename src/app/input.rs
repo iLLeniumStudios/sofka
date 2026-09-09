@@ -1050,11 +1050,15 @@ impl App {
         self.cmd_sel = 0;
     }
 
-    /// Switch to the cluster a palette label names. Matching is by label, so
-    /// `prod` and `prod@work` select different clusters.
+    /// The cluster a palette label names. Matching is by label, so `prod` and
+    /// `prod@work` are different clusters; a label nothing matches is taken as
+    /// a context in the default kubeconfig.
+    pub(super) fn resolve_cluster_label(&self, label: &str) -> crate::kubeconfigs::ClusterId {
+        crate::kubeconfigs::resolve_label(&self.all_contexts, label)
+    }
+
     pub(super) fn switch_context_labeled(&mut self, label: &str) {
-        let id = crate::kubeconfigs::resolve_label(&self.all_contexts, label);
-        self.switch_context(id);
+        self.switch_context(self.resolve_cluster_label(label));
     }
 
     /// Type the row filter. Local terms (fuzzy/inverse/column comparisons)
